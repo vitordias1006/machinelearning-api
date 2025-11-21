@@ -7,7 +7,6 @@ import os
 from datetime import datetime
 import json
 import oracledb
-import os
 
 app = Flask(__name__)
 CORS(app)
@@ -18,183 +17,72 @@ label_encoder = None
 skill_columns = None
 career_names = None
 dados_clean = None
+model_loaded = False
 
-# Configuração DIRETA do Oracle - SEM variáveis de ambiente
+# Configuração do Oracle
 ORACLE_CONFIG = {
-    'user': 'rm565422',  # Coloque seu usuário aqui
-    'password': '241006',  # Coloque sua senha aqui
-    'dsn': 'oracle.fiap.com.br:1521/ORCL'  # Para Oracle XE
+    'user': 'rm565422',
+    'password': '241006', 
+    'dsn': 'oracle.fiap.com.br:1521/ORCL'
 }
 
 def get_db_connection():
+    """Estabelece conexão com o Oracle Database"""
     try:
-        # Conexão em modo THIN → igual ao JDBC
         connection = oracledb.connect(
             user=ORACLE_CONFIG['user'],
             password=ORACLE_CONFIG['password'],
-            dsn=ORACLE_CONFIG['dsn'],  # já está correto
+            dsn=ORACLE_CONFIG['dsn'],
             mode=oracledb.DEFAULT_AUTH
         )
-        print("Conectado ao Oracle em modo THIN!")
+        print("✅ Conectado ao Oracle em modo THIN!")
         return connection
-
     except Exception as e:
-        print(f"Erro ao conectar ao Oracle (modo THIN): {e}")
+        print(f"❌ Erro ao conectar ao Oracle: {e}")
         return None
-
-
-def create_tables():
-    """Cria as tabelas necessárias no Oracle"""
-    connection = get_db_connection()
-    if connection:
-        try:
-            cursor = connection.cursor()
-            
-            # Tabela de recomendações
-            cursor.execute("""
-                BEGIN
-                    EXECUTE IMMEDIATE '
-                        CREATE TABLE career_recommendations (
-                            id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            user_skills CLOB,
-                            user_experience VARCHAR2(200),
-                            user_education VARCHAR2(200),
-                            top_recommendation VARCHAR2(200),
-                            top_compatibility NUMBER(5,2),
-                            all_recommendations CLOB,
-                            ip_address VARCHAR2(45)
-                        )
-                    ';
-                EXCEPTION
-                    WHEN OTHERS THEN
-                        IF SQLCODE != -955 THEN -- tabela já existe
-                            RAISE;
-                        END IF;
-                END;
-            """)
-            
-            # Tabela de logs da API
-            cursor.execute("""
-                BEGIN
-                    EXECUTE IMMEDIATE '
-                        CREATE TABLE api_usage_logs (
-                            id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            endpoint VARCHAR2(100),
-                            method VARCHAR2(10),
-                            response_time NUMBER(10,2),
-                            status_code NUMBER(3)
-                        )
-                    ';
-                EXCEPTION
-                    WHEN OTHERS THEN
-                        IF SQLCODE != -955 THEN
-                            RAISE;
-                        END IF;
-                END;
-            """)
-            
-            # Tabela de skills das carreiras
-            cursor.execute("""
-                BEGIN
-                    EXECUTE IMMEDIATE '
-                        CREATE TABLE career_skills (
-                            id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                            career_id NUMBER,
-                            career_name VARCHAR2(200),
-                            required_skills CLOB,
-                            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                    ';
-                EXCEPTION
-                    WHEN OTHERS THEN
-                        IF SQLCODE != -955 THEN
-                            RAISE;
-                        END IF;
-                END;
-            """)
-            
-            connection.commit()
-            print("✅ Tabelas criadas/verificadas no Oracle!")
-            
-        except Exception as e:
-            print(f"❌ Erro ao criar tabelas: {e}")
-        finally:
-            cursor.close()
-            connection.close()
 
 def test_oracle_connection():
     """Testa a conexão com Oracle"""
     try:
         print("🧪 Testando conexão com Oracle...")
-
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
             cursor.execute("SELECT 'OK' FROM dual")
             result = cursor.fetchone()
-
+            cursor.close()
+            conn.close()
+            
             if result and result[0] == "OK":
                 print("✅ Oracle conectado via modo THIN!")
                 return True
-
         return False
-
     except Exception as e:
         print(f"❌ Falha no teste de conexão: {e}")
         return False
 
-import os
-import pickle
-
-# No Render, use o caminho absoluto
-if 'RENDER' in os.environ:  # Ou verifique outra variável de ambiente do Render
-    base_path = os.path.abspath(os.path.dirname(__file__))
-    model_path = os.path.join(base_path, 'seu_modelo.pkl')
-else:
-    model_path = 'seu_modelo.pkl'  # caminho local
-
-# Carregar o modelo
-try:
-    with open(model_path, 'rb') as f:
-        model = pickle.load(f)
-except FileNotFoundError:
-    print(f"ERRO: Arquivo {model_path} não encontrado!")
-    # Log adicional para debug
-    print("Diretório atual:", os.getcwd())
-    print("Arquivos no diretório:", os.listdir('.'))
-
-@app.route('/debug-files')
-def debug_files():
-    import os
-    current_dir = os.getcwd()
-    files = []
-    
-    # Listar todos os arquivos
-    for root, dirs, filenames in os.walk('.'):
-        for filename in filenames:
-            files.append(os.path.join(root, filename))
-    
-    return {
-        'current_directory': current_dir,
-        'files': files
-    }
-
 def load_model_and_data():
     """Carrega o modelo treinado e os dados necessários"""
-    global model, label_encoder, skill_columns, career_names, dados_clean
+    global model, label_encoder, skill_columns, career_names, dados_clean, model_loaded
     
     try:
         base_path = os.path.dirname(__file__)
-        model_path = os.path.join(base_path, 'career_model.pkl')
-        components_path = os.path.join(base_path, 'career_components.pkl')
+        
+        # Verificar se arquivos existem
+        required_files = ['career_model.pkl', 'career_components.pkl']
+        for file in required_files:
+            file_path = os.path.join(base_path, file)
+            if not os.path.exists(file_path):
+                print(f"❌ Arquivo não encontrado: {file_path}")
+                return False
         
         # Carregar o modelo
+        model_path = os.path.join(base_path, 'career_model.pkl')
         with open(model_path, 'rb') as f:
             model = pickle.load(f)
         
-        # Carregar os outros componentes
+        # Carregar os componentes
+        components_path = os.path.join(base_path, 'career_components.pkl')
         with open(components_path, 'rb') as f:
             components = pickle.load(f)
             label_encoder = components['label_encoder']
@@ -202,11 +90,31 @@ def load_model_and_data():
             career_names = components['career_names']
             dados_clean = components['dados_clean']
         
-        print("✅ Modelo e dados carregados com sucesso!")
-        return True
+        # Verificar se tudo foi carregado corretamente
+        if (model is not None and skill_columns is not None and 
+            career_names is not None and dados_clean is not None):
+            model_loaded = True
+            print("✅ Modelo e dados carregados com sucesso!")
+            print(f"   - Carreiras: {len(career_names)}")
+            print(f"   - Skills: {len(skill_columns)}")
+            return True
+        else:
+            print("❌ Componentes não carregados corretamente")
+            return False
+            
     except Exception as e:
         print(f"❌ Erro ao carregar modelo: {e}")
+        import traceback
+        print(f"🔍 Detalhes: {traceback.format_exc()}")
         return False
+
+def ensure_model_loaded():
+    """Garante que o modelo está carregado antes de processar"""
+    global model_loaded
+    if not model_loaded:
+        print("🔄 Modelo não carregado, tentando carregar agora...")
+        return load_model_and_data()
+    return True
 
 def save_recommendation_oracle(user_data, recommendations):
     """Salva a recomendação no Oracle Database"""
@@ -248,56 +156,12 @@ def save_recommendation_oracle(user_data, recommendations):
         cursor.close()
         connection.close()
 
-def get_recommendation_stats_oracle():
-    """Obtém estatísticas do Oracle Database"""
-    connection = get_db_connection()
-    if not connection:
-        return None
-    
-    try:
-        cursor = connection.cursor()
-        
-        # Total de recomendações
-        cursor.execute("SELECT COUNT(*) FROM career_recommendations")
-        total_recommendations = cursor.fetchone()[0]
-        
-        # Carreira mais recomendada
-        cursor.execute("""
-            SELECT top_recommendation, COUNT(*) as count 
-            FROM career_recommendations 
-            WHERE top_recommendation != 'Nenhuma'
-            GROUP BY top_recommendation 
-            ORDER BY count DESC 
-            FETCH FIRST 1 ROWS ONLY
-        """)
-        top_career_result = cursor.fetchone()
-        top_career = top_career_result[0] if top_career_result else "Nenhuma"
-        top_career_count = top_career_result[1] if top_career_result else 0
-        
-        # Compatibilidade média
-        cursor.execute("""
-            SELECT AVG(top_compatibility) FROM career_recommendations 
-            WHERE top_compatibility > 0
-        """)
-        avg_compatibility = cursor.fetchone()[0] or 0
-        
-        return {
-            'total_recommendations': total_recommendations,
-            'most_recommended_career': top_career,
-            'most_recommended_count': top_career_count,
-            'average_compatibility': round(float(avg_compatibility), 2)
-        }
-        
-    except Exception as e:
-        print(f"❌ Erro ao buscar estatísticas: {e}")
-        return None
-    finally:
-        cursor.close()
-        connection.close()
-
 def get_career_skills(career_name):
     """Obtém as skills relevantes para uma carreira específica"""
     try:
+        if career_names is None or dados_clean is None or skill_columns is None:
+            return []
+            
         career_idx = None
         for idx, name in career_names.items():
             if name == career_name:
@@ -316,33 +180,57 @@ def get_career_skills(career_name):
                 career_skills.append(skill_name)
         
         return career_skills[:8]
-    except:
+    except Exception as e:
+        print(f"❌ Erro ao buscar skills da carreira: {e}")
         return []
 
+# ROTAS DA API
 @app.route('/')
 def home():
     """Endpoint inicial"""
     db_status = "connected" if get_db_connection() else "disconnected"
+    model_status = "loaded" if model_loaded else "not loaded"
+    
     return jsonify({
         "message": "🚀 API de Recomendação de Carreiras",
         "status": "online",
         "database": db_status,
-        "oracle_config": {
-            "user": ORACLE_CONFIG['user'],
-            "dsn": ORACLE_CONFIG['dsn']
-        },
+        "model_status": model_status,
         "endpoints": {
             "/recommend": "POST - Recebe skills e retorna recomendações",
-            "/stats": "GET - Estatísticas do modelo e recomendações",
+            "/stats": "GET - Estatísticas do modelo",
             "/skills": "GET - Lista de skills disponíveis",
-            "/careers": "GET - Lista de carreiras disponíveis"
+            "/careers": "GET - Lista de carreiras disponíveis",
+            "/debug-files": "GET - Lista arquivos do servidor"
         }
+    })
+
+@app.route('/debug-files')
+def debug_files():
+    """Endpoint para debug - mostra arquivos no servidor"""
+    import os
+    current_dir = os.getcwd()
+    files = []
+    
+    for root, dirs, filenames in os.walk('.'):
+        for filename in filenames:
+            files.append(os.path.join(root, filename))
+    
+    return jsonify({
+        'current_directory': current_dir,
+        'files': sorted(files)
     })
 
 @app.route('/recommend', methods=['POST'])
 def recommend_careers():
     """Endpoint principal para recomendação de carreiras"""
     try:
+        # Verificar se o modelo está carregado
+        if not ensure_model_loaded():
+            return jsonify({
+                "error": "Modelo não carregado. Serviço temporariamente indisponível."
+            }), 503
+        
         data = request.get_json()
         
         if not data or 'skills' not in data:
@@ -358,6 +246,11 @@ def recommend_careers():
             return jsonify({
                 "error": "A lista de skills não pode estar vazia"
             }), 400
+        
+        # DEBUG: Verificar estado das variáveis
+        print(f"🔍 DEBUG - skill_columns: {type(skill_columns)}, len: {len(skill_columns) if skill_columns else 'None'}")
+        print(f"🔍 DEBUG - career_names: {type(career_names)}, len: {len(career_names) if career_names else 'None'}")
+        print(f"🔍 DEBUG - model: {type(model)}")
         
         # Criar vetor de features para o usuário
         user_features = np.zeros(len(skill_columns))
@@ -394,8 +287,12 @@ def recommend_careers():
             "education": user_education
         }
         
-        # Salvar recomendação no Oracle
-        save_success = save_recommendation_oracle(user_data, top_recommendations)
+        # Tentar salvar no Oracle (opcional)
+        save_success = False
+        try:
+            save_success = save_recommendation_oracle(user_data, top_recommendations)
+        except Exception as e:
+            print(f"⚠️  Não foi possível salvar no Oracle: {e}")
         
         # Adicionar detalhes para a melhor recomendação
         if top_recommendations:
@@ -409,7 +306,7 @@ def recommend_careers():
                     "best_career": best_career,
                     "required_skills": required_skills
                 },
-                "database_status": "saved" if save_success else "failed"
+                "database_status": "saved" if save_success else "not_saved"
             }
         else:
             response = {
@@ -422,29 +319,28 @@ def recommend_careers():
         return jsonify(response)
         
     except Exception as e:
+        print(f"❌ Erro em /recommend: {e}")
+        import traceback
+        print(f"🔍 Traceback: {traceback.format_exc()}")
         return jsonify({
             "error": f"Erro no processamento: {str(e)}"
         }), 500
 
 @app.route('/stats', methods=['GET'])
 def get_stats():
-    """Retorna estatísticas do modelo e do banco de dados"""
+    """Retorna estatísticas do modelo"""
     try:
         total_careers = len(career_names) if career_names else 0
         total_skills = len(skill_columns) if skill_columns else 0
-        
-        # Estatísticas do Oracle
-        oracle_stats = get_recommendation_stats_oracle()
         
         stats_response = {
             "model_stats": {
                 "total_careers": total_careers,
                 "total_skills": total_skills,
-                "model_loaded": model is not None
+                "model_loaded": model_loaded,
+                "status": "operational" if model_loaded else "not_loaded"
             },
-            "database_stats": oracle_stats if oracle_stats else {"error": "Não foi possível conectar ao banco"},
-            "database_connection": "connected" if get_db_connection() else "disconnected",
-            "oracle_config": ORACLE_CONFIG
+            "database_connection": "connected" if get_db_connection() else "disconnected"
         }
         
         return jsonify(stats_response)
@@ -455,6 +351,9 @@ def get_stats():
 def get_available_skills():
     """Retorna lista de skills disponíveis para uso"""
     try:
+        if not ensure_model_loaded():
+            return jsonify({"error": "Modelo não carregado"}), 503
+            
         skills_list = []
         for skill_col in skill_columns[:50]:  # Retorna apenas as 50 primeiras
             skill_name = skill_col.replace('skill_', '').replace('_', ' ').title()
@@ -471,7 +370,10 @@ def get_available_skills():
 def get_available_careers():
     """Retorna lista de carreiras disponíveis"""
     try:
-        careers_list = list(career_names.values()) if career_names else []
+        if not ensure_model_loaded():
+            return jsonify({"error": "Modelo não carregado"}), 503
+            
+        careers_list = list(career_names.values())
         
         return jsonify({
             "available_careers": careers_list,
@@ -479,14 +381,13 @@ def get_available_careers():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
 
 @app.route('/careers-with-skills', methods=['GET'])
 def get_careers_with_skills():
     """Retorna todas as carreiras com suas skills"""
     try:
-        if model is None:
-            load_model_and_data()
+        if not ensure_model_loaded():
+            return jsonify({"error": "Modelo não carregado"}), 503
         
         careers_with_skills = []
         
@@ -513,7 +414,7 @@ def initialize():
     
     # Testar conexão Oracle
     if test_oracle_connection():
-        create_tables()
+        print("✅ Oracle conectado")
     else:
         print("⚠️  Oracle não conectado - API funcionará sem banco")
     
@@ -521,9 +422,15 @@ def initialize():
     if load_model_and_data():
         print("🎯 API Pronta para uso!")
     else:
-        print("❌ Modelo não carregado - verifique os arquivos .pkl")
+        print("❌ Falha ao carregar modelo - verifique os arquivos .pkl")
+
+# Inicializar quando o app startar
+@app.before_request
+def before_first_request():
+    """Executa antes da primeira requisição"""
+    initialize()
 
 if __name__ == '__main__':
     initialize()
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
