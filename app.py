@@ -27,27 +27,21 @@ ORACLE_CONFIG = {
 }
 
 def get_db_connection():
-    """Conexão direta com Oracle - sem variáveis de ambiente"""
     try:
+        # Conexão em modo THIN → igual ao JDBC
         connection = oracledb.connect(
             user=ORACLE_CONFIG['user'],
             password=ORACLE_CONFIG['password'],
-            dsn=ORACLE_CONFIG['dsn']
+            dsn=ORACLE_CONFIG['dsn'],  # já está correto
+            mode=oracledb.DEFAULT_AUTH
         )
-        print(f"✅ Conectado ao Oracle: {ORACLE_CONFIG['user']}@{ORACLE_CONFIG['dsn']}")
+        print("Conectado ao Oracle em modo THIN!")
         return connection
-        
-    except oracledb.Error as e:
-        error, = e.args
-        print(f"❌ Erro Oracle: {error.code} - {error.message}")
-        print("💡 Dicas:")
-        print("   - Verifique se o Oracle está rodando")
-        print("   - Confirme usuário/senha")
-        print("   - Tente DSN: localhost:1521/XEPDB1 para Oracle 21c XE")
-        return None
+
     except Exception as e:
-        print(f"❌ Erro geral: {e}")
+        print(f"Erro ao conectar ao Oracle (modo THIN): {e}")
         return None
+
 
 def create_tables():
     """Cria as tabelas necessárias no Oracle"""
@@ -134,17 +128,19 @@ def test_oracle_connection():
     """Testa a conexão com Oracle"""
     try:
         print("🧪 Testando conexão com Oracle...")
-        
+
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT '✅ Oracle conectado!', banner FROM v$version WHERE rownum = 1")
+            cursor.execute("SELECT 'OK' FROM dual")
             result = cursor.fetchone()
-            print(f"{result[0]} - {result[1]}")
-            cursor.close()
-            conn.close()
-            return True
+
+            if result and result[0] == "OK":
+                print("✅ Oracle conectado via modo THIN!")
+                return True
+
         return False
+
     except Exception as e:
         print(f"❌ Falha no teste de conexão: {e}")
         return False
