@@ -1,6 +1,6 @@
 flask==2.3.3
 flask-cors==4.0.0
-pandas==2.0.3
-numpy==1.24.3
-oracledb==1.4.2
+pandas==2.1.4
+numpy==1.26.4
+oracledb==2.5.1
 gunicorn==21.2.0
