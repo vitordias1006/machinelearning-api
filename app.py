@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 import json
 import oracledb
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -148,17 +149,23 @@ def test_oracle_connection():
         print(f"❌ Falha no teste de conexão: {e}")
         return False
 
+import os
+
 def load_model_and_data():
     """Carrega o modelo treinado e os dados necessários"""
     global model, label_encoder, skill_columns, career_names, dados_clean
     
     try:
+        base_path = os.path.dirname(__file__)
+        model_path = os.path.join(base_path, 'career_model.pkl')
+        components_path = os.path.join(base_path, 'career_components.pkl')
+        
         # Carregar o modelo
-        with open('career_model.pkl', 'rb') as f:
+        with open(model_path, 'rb') as f:
             model = pickle.load(f)
         
         # Carregar os outros componentes
-        with open('career_components.pkl', 'rb') as f:
+        with open(components_path, 'rb') as f:
             components = pickle.load(f)
             label_encoder = components['label_encoder']
             skill_columns = components['skill_columns']
