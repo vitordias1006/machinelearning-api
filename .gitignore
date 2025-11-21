@@ -1,0 +1,5 @@
+.env
+.venv/
+instantclient_23_0.lnk
+__pycache__/
+*.pyc
