@@ -146,6 +146,40 @@ def test_oracle_connection():
         return False
 
 import os
+import pickle
+
+# No Render, use o caminho absoluto
+if 'RENDER' in os.environ:  # Ou verifique outra variável de ambiente do Render
+    base_path = os.path.abspath(os.path.dirname(__file__))
+    model_path = os.path.join(base_path, 'seu_modelo.pkl')
+else:
+    model_path = 'seu_modelo.pkl'  # caminho local
+
+# Carregar o modelo
+try:
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+except FileNotFoundError:
+    print(f"ERRO: Arquivo {model_path} não encontrado!")
+    # Log adicional para debug
+    print("Diretório atual:", os.getcwd())
+    print("Arquivos no diretório:", os.listdir('.'))
+
+@app.route('/debug-files')
+def debug_files():
+    import os
+    current_dir = os.getcwd()
+    files = []
+    
+    # Listar todos os arquivos
+    for root, dirs, filenames in os.walk('.'):
+        for filename in filenames:
+            files.append(os.path.join(root, filename))
+    
+    return {
+        'current_directory': current_dir,
+        'files': files
+    }
 
 def load_model_and_data():
     """Carrega o modelo treinado e os dados necessários"""
